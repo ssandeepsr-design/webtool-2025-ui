@@ -122,7 +122,7 @@
 <body>
   <header>
     <h1>Babyvoeding Tracker</h1>
-    <div class="sub">Voedingen berekenen, opslaan en per dag terugkijken.</div>
+    <div class="sub">Voedingen berekenen, opslaan en per dag terugkijken (gedeeld via Firebase).</div>
   </header>
 
   <div class="container">
@@ -240,6 +240,27 @@
     </section>
   </div>
 
+  <!-- 1) Firebase laden -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+
+  <!-- 2) Firebase config van jou -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDeUTJx__fcCQ_aKf8dIyp3vhsbJrBL3p4",
+      authDomain: "babyvoeding-8263a.firebaseapp.com",
+      databaseURL: "https://babyvoeding-8263a-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "babyvoeding-8263a",
+      storageBucket: "babyvoeding-8263a.firebasestorage.app",
+      messagingSenderId: "903563079285",
+      appId: "1:903563079285:web:738ed06e4027ff8143523c"
+    };
+    const app = firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const FAMILY_ID = "ramdhan-saanvi-2025"; // mag je later veranderen
+  </script>
+
+  <!-- 3) Baby-tracker logica -->
   <script>
     const $ = s => document.querySelector(s);
     const pad = n => String(n).padStart(2,'0');
@@ -249,14 +270,26 @@
     const midnightTs = d => { const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
     const roundUp30 = n => Math.ceil(n/30)*30;
 
-    const SETTINGS_KEY = 'baby_settings_public';
-    const FEEDS_KEY = 'baby_feeds_public';
-    const save = (k,v) => localStorage.setItem(k, JSON.stringify(v));
-    const load = (k,def) => { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(def)); } catch { return def; } };
-
-    const settings = load(SETTINGS_KEY, { weight:4, mlPerKg:150, feedsPerDay:8, firstFeed:'06:30' });
-    const feeds = load(FEEDS_KEY, []);
+    // gedeelde data
+    const settings = { weight:4, mlPerKg:150, feedsPerDay:8, firstFeed:"06:30" };
+    const feeds = []; // vullen we vanuit Firebase
     const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    // Firebase helpers
+    async function loadRemoteSettings() {
+      const snap = await db.ref("families/" + FAMILY_ID + "/settings").get();
+      return snap.exists() ? snap.val() : { weight:4, mlPerKg:150, feedsPerDay:8, firstFeed:"06:30" };
+    }
+    async function saveRemoteSettings(obj) {
+      await db.ref("families/" + FAMILY_ID + "/settings").set(obj);
+    }
+    async function loadRemoteFeeds() {
+      const snap = await db.ref("families/" + FAMILY_ID + "/feeds").get();
+      return snap.exists() ? snap.val() : [];
+    }
+    async function saveRemoteFeeds(list) {
+      await db.ref("families/" + FAMILY_ID + "/feeds").set(list);
+    }
 
     function computeGoals(){
       const w = parseFloat($('#weight').value)||0;
@@ -269,22 +302,11 @@
       $('#goalPerDay').value = Math.round(total);
       $('#goalInterval').value = Math.round(1440/fpd);
     }
-    function persistSettings(){
-      settings.weight = parseFloat($('#weight').value)||0;
-      settings.mlPerKg = parseFloat($('#mlPerKg').value)||0;
-      settings.feedsPerDay = Math.max(1, parseInt($('#feedsPerDay').value)||1);
-      settings.firstFeed = $('#firstFeed').value||'06:30';
-      save(SETTINGS_KEY, settings);
-      computeGoals();
-      renderAll();
-    }
-
     function feedsOn(dateStr){
       const d = parseLocalDate(dateStr);
       const start = midnightTs(d), end = start + 86400000;
       return feeds.filter(f => f.t >= start && f.t < end).sort((a,b)=>a.t-b.t);
     }
-
     function renderDay(){
       const list = feedsOn($('#viewDate').value);
       const body = $('#dayBody'); body.innerHTML = '';
@@ -298,22 +320,34 @@
         const timeInput = document.createElement('input');
         timeInput.type='time';
         timeInput.value=`${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        timeInput.addEventListener('change',()=>{
+        timeInput.addEventListener('change', async ()=>{
           const [hh,mm] = timeInput.value.split(':').map(Number);
           const vd = parseLocalDate($('#viewDate').value);
           f.t = makeTsLocal(vd.getFullYear(), vd.getMonth()+1, vd.getDate(), hh, mm);
-          save(FEEDS_KEY, feeds); renderAll();
+          await saveRemoteFeeds(feeds);
+          renderAll();
         });
         tdT.append(timeInput);
 
         const tdMl = document.createElement('td'); tdMl.className='right';
         const mlInput = document.createElement('input'); mlInput.type='number'; mlInput.min='0'; mlInput.value=f.ml;
-        mlInput.addEventListener('change',()=>{ f.ml = parseInt(mlInput.value)||0; save(FEEDS_KEY, feeds); renderAll(); });
+        mlInput.addEventListener('change', async ()=>{
+          f.ml = parseInt(mlInput.value)||0;
+          await saveRemoteFeeds(feeds);
+          renderAll();
+        });
         tdMl.append(mlInput);
 
         const tdA = document.createElement('td'); tdA.className='right';
         const del = document.createElement('button'); del.className='btn danger'; del.textContent='Verwijder';
-        del.addEventListener('click',()=>{ const i=feeds.findIndex(x=>x.id===f.id); if(i>-1){ feeds.splice(i,1); save(FEEDS_KEY, feeds); renderAll(); } });
+        del.addEventListener('click', async ()=>{
+          const i = feeds.findIndex(x=>x.id===f.id);
+          if(i>-1){
+            feeds.splice(i,1);
+            await saveRemoteFeeds(feeds);
+            renderAll();
+          }
+        });
         tdA.append(del);
 
         tr.append(tdT, tdMl, tdA); body.append(tr);
@@ -321,7 +355,6 @@
       $('#dayTotal').textContent = sum + ' ml';
       $('#dayCount').textContent = list.length;
     }
-
     function renderHistory(){
       const hb = $('#historyBody'); hb.innerHTML='';
       const byDay = new Map();
@@ -337,7 +370,6 @@
       });
       if(days.length===0){ hb.innerHTML = '<tr><td colspan="4" class="sub">Nog geen gegevens.</td></tr>'; }
     }
-
     function renderNext(){
       const fpd = Math.max(1, parseInt($('#feedsPerDay').value)||1);
       const intervalMs = (1440/fpd)*60000;
@@ -355,58 +387,116 @@
       const last = feeds.slice().sort((a,b)=>a.t-b.t).pop();
       $('#nextFromLast').value = last ? new Date(last.t + intervalMs).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
     }
+    function renderAll(){
+      renderDay();
+      renderHistory();
+      renderNext();
+    }
 
-    function renderAll(){ renderDay(); renderHistory(); renderNext(); }
+    async function init(){
+      // settings uit firebase
+      const remoteSettings = await loadRemoteSettings();
+      Object.assign(settings, remoteSettings);
 
-    // init
-    $('#weight').value = settings.weight;
-    $('#mlPerKg').value = settings.mlPerKg;
-    $('#feedsPerDay').value = settings.feedsPerDay;
-    $('#firstFeed').value = settings.firstFeed;
+      // feeds uit firebase
+      const remoteFeeds = await loadRemoteFeeds();
+      feeds.length = 0; feeds.push(...remoteFeeds);
 
-    const now = new Date();
-    $('#feedDate').value = toDateInput(now);
-    $('#feedTime').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    $('#viewDate').value = toDateInput(now);
-    $('#dayLabel').textContent = toDateInput(now);
+      // UI vullen
+      $('#weight').value = settings.weight;
+      $('#mlPerKg').value = settings.mlPerKg;
+      $('#feedsPerDay').value = settings.feedsPerDay;
+      $('#firstFeed').value = settings.firstFeed;
 
-    computeGoals();
-    renderAll();
+      const now = new Date();
+      $('#feedDate').value = toDateInput(now);
+      $('#feedTime').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      $('#viewDate').value = toDateInput(now);
+      $('#dayLabel').textContent = toDateInput(now);
 
-    ['weight','mlPerKg','feedsPerDay','firstFeed'].forEach(id=>$('#'+id).addEventListener('change', persistSettings));
-    $('#useGoal').addEventListener('click',()=> $('#feedMl').value = $('#goalPerFeed').value);
-    $('#useGoalRounded').addEventListener('click',()=> $('#feedMl').value = $('#goalPerFeedRounded').value);
-    $('#nowBtn').addEventListener('click', ()=>{ const n=new Date(); $('#feedDate').value=toDateInput(n); $('#feedTime').value=`${pad(n.getHours())}:${pad(n.getMinutes())}`; });
-    $('#todayBtn').addEventListener('click', ()=>{ const n=new Date(); $('#viewDate').value=toDateInput(n); $('#dayLabel').textContent=toDateInput(n); renderAll(); });
-    $('#viewDate').addEventListener('change', ()=>{ $('#dayLabel').textContent = $('#viewDate').value; renderAll(); });
-    $('#addFeed').addEventListener('click', ()=>{
-      const date = $('#feedDate').value; const time = $('#feedTime').value; const ml = parseInt($('#feedMl').value);
-      if(!date || !time || !Number.isFinite(ml)){ alert('Vul datum, tijd en ml in.'); return; }
-      const [y,m,d] = date.split('-').map(Number); const [hh,mm] = time.split(':').map(Number);
-      feeds.push({ id: uid(), t: makeTsLocal(y,m,d,hh,mm), ml: Math.max(0, ml) });
-      save(FEEDS_KEY, feeds);
-      if($('#viewDate').value !== date){ $('#viewDate').value = date; $('#dayLabel').textContent = date; }
-      $('#feedMl').value = '';
+      computeGoals();
       renderAll();
-    });
-    $('#resetBtn').addEventListener('click', ()=>{
-      if(confirm('Alles wissen?')){
-        localStorage.removeItem(FEEDS_KEY);
-        localStorage.removeItem(SETTINGS_KEY);
+
+      // realtime luisteren → als jij iets verandert ziet je vrouw het ook
+      db.ref("families/" + FAMILY_ID + "/feeds").on("value", snap => {
+        const val = snap.val() || [];
         feeds.length = 0;
+        feeds.push(...val);
+        renderAll();
+      });
+      db.ref("families/" + FAMILY_ID + "/settings").on("value", snap => {
+        const val = snap.val();
+        if (val) {
+          settings.weight = val.weight;
+          settings.mlPerKg = val.mlPerKg;
+          settings.feedsPerDay = val.feedsPerDay;
+          settings.firstFeed = val.firstFeed;
+          $('#weight').value = settings.weight;
+          $('#mlPerKg').value = settings.mlPerKg;
+          $('#feedsPerDay').value = settings.feedsPerDay;
+          $('#firstFeed').value = settings.firstFeed;
+          computeGoals();
+          renderAll();
+        }
+      });
+    }
+
+    // events (na init worden velden al gezet)
+    document.addEventListener('DOMContentLoaded', ()=>{
+      init();
+
+      ['weight','mlPerKg','feedsPerDay','firstFeed'].forEach(id=>{
+        $('#'+id).addEventListener('change', async ()=>{
+          settings.weight = parseFloat($('#weight').value)||0;
+          settings.mlPerKg = parseFloat($('#mlPerKg').value)||0;
+          settings.feedsPerDay = Math.max(1, parseInt($('#feedsPerDay').value)||1);
+          settings.firstFeed = $('#firstFeed').value||'06:30';
+          await saveRemoteSettings(settings);
+          computeGoals();
+          renderAll();
+        });
+      });
+
+      $('#useGoal').addEventListener('click', ()=> $('#feedMl').value = $('#goalPerFeed').value );
+      $('#useGoalRounded').addEventListener('click', ()=> $('#feedMl').value = $('#goalPerFeedRounded').value );
+      $('#nowBtn').addEventListener('click', ()=>{
+        const n = new Date();
+        $('#feedDate').value = toDateInput(n);
+        $('#feedTime').value = `${pad(n.getHours())}:${pad(n.getMinutes())}`;
+      });
+      $('#todayBtn').addEventListener('click', ()=>{
         const n = new Date();
         $('#viewDate').value = toDateInput(n);
         $('#dayLabel').textContent = toDateInput(n);
-        $('#feedDate').value = toDateInput(n);
-        $('#feedTime').value = `${pad(n.getHours())}:${pad(n.getMinutes())}`;
-        $('#weight').value = 4.0;
-        $('#mlPerKg').value = 150;
-        $('#feedsPerDay').value = 8;
-        $('#firstFeed').value = '06:30';
-        save(SETTINGS_KEY, { weight:4, mlPerKg:150, feedsPerDay:8, firstFeed:'06:30' });
-        computeGoals();
         renderAll();
-      }
+      });
+      $('#viewDate').addEventListener('change', ()=>{
+        $('#dayLabel').textContent = $('#viewDate').value;
+        renderAll();
+      });
+      $('#addFeed').addEventListener('click', async ()=>{
+        const date = $('#feedDate').value;
+        const time = $('#feedTime').value;
+        const ml = parseInt($('#feedMl').value);
+        if(!date || !time || !Number.isFinite(ml)){ alert('Vul datum, tijd en ml in.'); return; }
+        const [y,m,d] = date.split('-').map(Number);
+        const [hh,mm] = time.split(':').map(Number);
+        feeds.push({ id: uid(), t: makeTsLocal(y,m,d,hh,mm), ml: Math.max(0, ml) });
+        await saveRemoteFeeds(feeds);
+        if($('#viewDate').value !== date){ $('#viewDate').value = date; $('#dayLabel').textContent = date; }
+        $('#feedMl').value = '';
+        renderAll();
+      });
+      $('#resetBtn').addEventListener('click', async ()=>{
+        if(confirm('Alles wissen?')){
+          feeds.length = 0;
+          await saveRemoteFeeds(feeds);
+          const def = { weight:4, mlPerKg:150, feedsPerDay:8, firstFeed:"06:30" };
+          Object.assign(settings, def);
+          await saveRemoteSettings(def);
+          init();
+        }
+      });
     });
   </script>
 </body>
