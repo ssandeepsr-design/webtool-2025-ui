@@ -112,7 +112,7 @@
         <div class="row">
           <div class="field"><label>Datum</label><input id="feedDate" type="date" required></div>
           <div class="field"><label>Tijd</label><input id="feedTime" type="time" required></div>
-          <div class="field"><label>Hoeveelheid (ml)</label><input id="feedMl" type="number" min="0" placeholder="90" required></div>
+          <div class="field"><label>Hoeveelheid (ml)</label><input id="feedMl" type="number" min="0" placeholder="0" required></div>
           <div class="field"><label>&nbsp;</label><button class="btn" id="addFeed">Opslaan</button></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px" class="no-print">
@@ -127,7 +127,7 @@
       <h2>Volgende fles</h2>
       <div class="row">
         <div class="field"><label>Vanaf laatste voeding</label><input id="nextFromLast" type="text" readonly></div>
-        <div class="field"><label>Gemiddelde uur tussen voeding</label><input id="avgInterval" type="text" readonly></div>
+        <div class="field"><label>Interval</label><input id="avgInterval" type="text" readonly></div>
       </div>
       <p class="sub">Het gemiddelde is gebaseerd op de ingevoerde voedingen van vandaag.</p>
     </section>
